@@ -1,15 +1,14 @@
 package com.lauty.w2v;
 
-import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.BufferedOutputStream;
+import java.io.DataOutputStream;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PushbackReader;
 import java.io.RandomAccessFile;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Random;
 
 import com.lauty.w2v.util.UnReadRAF;
 
@@ -70,20 +69,15 @@ public class Word2Vec {
 
 	}
 
-	VocabWord[] vocabs;
+	static VocabWord[] vocabs;
 
-	int[] table;
-	int[] vocabHash;
-	private String trainFile = "";
-	private char[] outputFile = new char[MAX_STRING];
-	private String saveVocabFile = "";
-	private String readVocabFile = "";
-	int binary = 0, cbow = 0, debug_mode = 2, window = 5, min_count = 5, num_threads = 1, min_reduce = 1;
-	int vocabMaxSize = 1000, vocabSize = 0, layer1Size = 100;
-	long trainWords = 0, wordCountActual = 0, fileSize = 0, classes = 0;
-	float alpha = 0.025f, startingAlpha, sample = 0;
-	int hs = 1, negative = 0;
-	double tableSize = 1e8;
+	static int[] table, vocabHash;
+	private static String trainFile = "", outputFile = "", saveVocabFile = "", readVocabFile = "";
+	static int classes = 0, hs = 1, negative = 0, binary = 0, cbow = 0, debug_mode = 2, window = 5, min_count = 5, num_threads = 1, min_reduce = 1, vocabMaxSize = 1000, vocabSize = 0,
+			layer1Size = 100;
+	static long trainWords = 0, wordCountActual = 0, fileSize = 0, start = System.currentTimeMillis();
+	static double alpha = 0.025f, startingAlpha, sample = 0, tableSize = 1e8;
+	static double[] syn0, syn1, syn1neg, expTable;
 
 	public void initUniGramTable() {
 		int a, i;
@@ -107,7 +101,7 @@ public class Word2Vec {
 	}
 
 	// Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-	public void readWord(char[] word, UnReadRAF unraf) {
+	public static void readWord(char[] word, UnReadRAF unraf) {
 		//PushbackReader pushbackReader = new PushbackReader(reader);
 		int a = 0, ch;
 		try {
@@ -139,7 +133,7 @@ public class Word2Vec {
 	}
 
 	// Returns hash value of a word
-	public int getWordHash(char[] word) {
+	public static int getWordHash(char[] word) {
 		int a, hash = 0;
 		for (a = 0; a < word.length; a++)
 			hash = hash * 257 + word[a];
@@ -148,7 +142,7 @@ public class Word2Vec {
 	}
 
 	// Returns position of a word in the vocabulary; if the word is not found, returns -1
-	public int searchVocab(char[] word) {
+	public static int searchVocab(char[] word) {
 		int hash = getWordHash(word);
 		while (true) {
 			if (vocabHash[hash] == -1)
@@ -160,7 +154,7 @@ public class Word2Vec {
 		}
 	}
 
-	public int readWordIndex(UnReadRAF unraf) {
+	public static int readWordIndex(UnReadRAF unraf) {
 		char[] word = new char[MAX_STRING];
 		readWord(word, unraf);
 		try {
@@ -173,7 +167,7 @@ public class Word2Vec {
 	}
 
 	// Adds a word to the vocabulary
-	public int addWordToVocab(char[] word) {
+	public static int addWordToVocab(char[] word) {
 		int hash, length = word.length + 1;
 		if (length > MAX_STRING)
 			length = MAX_STRING;
@@ -444,6 +438,380 @@ public class Word2Vec {
 			}
 		}
 
+	}
+
+	public void initNet() {
+		int a, b;
+		syn0 = new double[vocabSize * layer1Size];
+		if (hs != 0) {
+			syn1 = new double[vocabSize * layer1Size];
+			for (b = 0; b < layer1Size; b++)
+				for (a = 0; a < vocabSize; a++)
+					syn1[a * layer1Size + b] = 0;
+		}
+		if (negative > 0) {
+			syn1neg = new double[vocabSize * layer1Size];
+			for (b = 0; b < layer1Size; b++)
+				for (a = 0; a < vocabSize; a++)
+					syn1neg[a * layer1Size + b] = 0;
+		}
+		Random random = new Random();
+		for (b = 0; b < layer1Size; b++)
+			for (a = 0; a < vocabSize; a++)
+				syn0[a * layer1Size + b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
+		createBinaryTree();
+	}
+
+	public class TrainModelThread extends Thread {
+		final long id;
+
+		public TrainModelThread(long id) {
+			this.id = id;
+		}
+
+		@Override
+		public void run() {
+			long next_random = id;
+			int a, b, d, word, last_word, sentence_length = 0, sentence_position = 0, word_count = 0, last_word_count = 0, c, l1, l2, target;
+			int[] sen = new int[MAX_SENTENCE_LENGTH + 1];
+			long label, now = System.currentTimeMillis();
+			double f, g;
+			double[] neu1 = new double[layer1Size], neu1e = new double[layer1Size];
+
+			UnReadRAF unraf = null;
+			try {
+				unraf = new UnReadRAF(trainFile, "rb");
+				unraf.seek(fileSize / num_threads * id);
+				while (true) {
+					if (word_count - last_word_count > 10000) {
+						wordCountActual += word_count - last_word_count;
+						last_word_count = word_count;
+						if ((debug_mode > 1)) {
+							now = System.currentTimeMillis();
+							System.out.printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk  ", 13, alpha, wordCountActual / (float) (trainWords + 1) * 100, wordCountActual
+									/ ((float) (now - start + 1) / 1000));
+							//fflush(stdout);
+						}
+						alpha = startingAlpha * (1 - wordCountActual / (trainWords + 1));
+						if (alpha < startingAlpha * 0.0001)
+							alpha = startingAlpha * 0.0001;
+					}
+					if (sentence_length == 0) {
+						while (true) {
+							word = readWordIndex(unraf);
+							if (unraf.read() == -1) {
+								break;
+							}
+							if (word == -1)
+								continue;
+							word_count++;
+							if (word == 0)
+								break;
+							// The subsampling randomly discards frequent words while keeping the ranking same
+							if (sample > 0) {
+								double ran = (Math.sqrt(vocabs[word].getCn() / (sample * trainWords)) + 1) * (sample * trainWords) / vocabs[word].getCn();
+								next_random = next_random * 25214903917l + 11;
+								if (ran < (next_random & 0xFFFF) / 65536)
+									continue;
+							}
+							sen[sentence_length] = word;
+							sentence_length++;
+							if (sentence_length >= MAX_SENTENCE_LENGTH)
+								break;
+						}
+						sentence_position = 0;
+					}
+					if (unraf.read() == -1) {
+						break;
+					}
+					if (word_count > trainWords / num_threads)
+						break;
+					word = sen[sentence_position];
+					if (word == -1)
+						continue;
+					for (c = 0; c < layer1Size; c++)
+						neu1[c] = 0;
+					for (c = 0; c < layer1Size; c++)
+						neu1e[c] = 0;
+					next_random = next_random * 25214903917l + 11;
+					b = (int) (next_random % window);
+					if (cbow != 0) { //train the cbow architecture
+						// in -> hidden
+						for (a = b; a < window * 2 + 1 - b; a++)
+							if (a != window) {
+								c = sentence_position - window + a;
+								if (c < 0)
+									continue;
+								if (c >= sentence_length)
+									continue;
+								last_word = sen[c];
+								if (last_word == -1)
+									continue;
+								for (c = 0; c < layer1Size; c++)
+									neu1[c] += syn0[c + last_word * layer1Size];
+							}
+						if (hs != 0)
+							for (d = 0; d < vocabs[word].getCodeLen(); d++) {
+								f = 0;
+								l2 = vocabs[word].getPoint()[d] * layer1Size;
+								// Propagate hidden -> output
+								for (c = 0; c < layer1Size; c++)
+									f += neu1[c] * syn1[c + l2];
+								if (f <= -MAX_EXP)
+									continue;
+								else if (f >= MAX_EXP)
+									continue;
+								else
+									f = expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+								// 'g' is the gradient multiplied by the learning rate
+								g = (1 - vocabs[word].getCode()[d] - f) * alpha;
+								// Propagate errors output -> hidden
+								for (c = 0; c < layer1Size; c++)
+									neu1e[c] += g * syn1[c + l2];
+								// Learn weights hidden -> output
+								for (c = 0; c < layer1Size; c++)
+									syn1[c + l2] += g * neu1[c];
+							}
+						// NEGATIVE SAMPLING
+						if (negative > 0)
+							for (d = 0; d < negative + 1; d++) {
+								if (d == 0) {
+									target = word;
+									label = 1;
+								} else {
+									next_random = next_random * 25214903917l + 11;
+									target = table[(int) ((next_random >> 16) % tableSize)];
+									if (target == 0)
+										target = (int) (next_random % (vocabSize - 1) + 1);
+									if (target == word)
+										continue;
+									label = 0;
+								}
+								l2 = target * layer1Size;
+								f = 0;
+								for (c = 0; c < layer1Size; c++)
+									f += neu1[c] * syn1neg[c + l2];
+								if (f > MAX_EXP)
+									g = (label - 1) * alpha;
+								else if (f < -MAX_EXP)
+									g = (label - 0) * alpha;
+								else
+									g = (label - expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
+								for (c = 0; c < layer1Size; c++)
+									neu1e[c] += g * syn1neg[c + l2];
+								for (c = 0; c < layer1Size; c++)
+									syn1neg[c + l2] += g * neu1[c];
+							}
+						// hidden -> in
+						for (a = b; a < window * 2 + 1 - b; a++)
+							if (a != window) {
+								c = sentence_position - window + a;
+								if (c < 0)
+									continue;
+								if (c >= sentence_length)
+									continue;
+								last_word = sen[c];
+								if (last_word == -1)
+									continue;
+								for (c = 0; c < layer1Size; c++)
+									syn0[c + last_word * layer1Size] += neu1e[c];
+							}
+					} else { //train skip-gram
+						for (a = b; a < window * 2 + 1 - b; a++)
+							if (a != window) {
+								c = sentence_position - window + a;
+								if (c < 0)
+									continue;
+								if (c >= sentence_length)
+									continue;
+								last_word = sen[c];
+								if (last_word == -1)
+									continue;
+								l1 = last_word * layer1Size;
+								for (c = 0; c < layer1Size; c++)
+									neu1e[c] = 0;
+								// HIERARCHICAL SOFTMAX
+								if (hs != 0)
+									for (d = 0; d < vocabs[word].getCodeLen(); d++) {
+										f = 0;
+										l2 = vocabs[word].getPoint()[d] * layer1Size;
+										// Propagate hidden -> output
+										for (c = 0; c < layer1Size; c++)
+											f += syn0[c + l1] * syn1[c + l2];
+										if (f <= -MAX_EXP)
+											continue;
+										else if (f >= MAX_EXP)
+											continue;
+										else
+											f = expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))];
+										// 'g' is the gradient multiplied by the learning rate
+										g = (1 - vocabs[word].getCode()[d] - f) * alpha;
+										// Propagate errors output -> hidden
+										for (c = 0; c < layer1Size; c++)
+											neu1e[c] += g * syn1[c + l2];
+										// Learn weights hidden -> output
+										for (c = 0; c < layer1Size; c++)
+											syn1[c + l2] += g * syn0[c + l1];
+									}
+								// NEGATIVE SAMPLING
+								if (negative > 0)
+									for (d = 0; d < negative + 1; d++) {
+										if (d == 0) {
+											target = word;
+											label = 1;
+										} else {
+											next_random = next_random * 25214903917l + 11;
+											target = table[(int) ((next_random >> 16) % tableSize)];
+											if (target == 0)
+												target = (int) (next_random % (vocabSize - 1) + 1);
+											if (target == word)
+												continue;
+											label = 0;
+										}
+										l2 = target * layer1Size;
+										f = 0;
+										for (c = 0; c < layer1Size; c++)
+											f += syn0[c + l1] * syn1neg[c + l2];
+										if (f > MAX_EXP)
+											g = (label - 1) * alpha;
+										else if (f < -MAX_EXP)
+											g = (label - 0) * alpha;
+										else
+											g = (label - expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
+										for (c = 0; c < layer1Size; c++)
+											neu1e[c] += g * syn1neg[c + l2];
+										for (c = 0; c < layer1Size; c++)
+											syn1neg[c + l2] += g * syn0[c + l1];
+									}
+								// Learn weights input -> hidden
+								for (c = 0; c < layer1Size; c++)
+									syn0[c + l1] += neu1e[c];
+							}
+					}
+					sentence_position++;
+					if (sentence_position >= sentence_length) {
+						sentence_length = 0;
+						continue;
+					}
+				}
+			} catch (FileNotFoundException e1) {
+				e1.printStackTrace();
+			} catch (IOException e) {
+				e.printStackTrace();
+			} finally {
+				if (unraf != null) {
+					try {
+						unraf.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+				neu1 = null;
+				neu1e = null;
+			}
+		}
+
+	}
+
+	public void trainModel() {
+		int a, b, c, d;
+		DataOutputStream dos = null;
+		try {
+			System.out.printf("Starting training using file %s\n", trainFile);
+			startingAlpha = alpha;
+			if (!readVocabFile.equals(""))
+				readVocab();
+			else
+				learnVocabFromTrainFile();
+			if (!readVocabFile.equals(""))
+				saveVocab();
+			if (outputFile.equals(""))
+				return;
+			initNet();
+			if (negative > 0)
+				initUniGramTable();
+			start = System.currentTimeMillis();
+			for (a = 0; a < num_threads; a++) {
+				TrainModelThread trainThread = new TrainModelThread(a);
+				trainThread.start();
+				trainThread.join();
+			}
+			dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile)));
+			if (classes == 0) {
+				// Save the word vectors
+				dos.writeUTF(String.format("%d %d\n", vocabSize, layer1Size));
+				for (a = 0; a < vocabSize; a++) {
+					dos.writeUTF(new String(vocabs[a].getWord()));
+					if (binary != 0)
+						for (b = 0; b < layer1Size; b++)
+							dos.writeDouble(syn0[a * layer1Size + b]);
+					else
+						for (b = 0; b < layer1Size; b++)
+							dos.writeUTF(syn0[a * layer1Size + b] + "");
+					dos.writeUTF("\n");
+				}
+			} else {
+				// Run K-means on the word vectors
+				int clcn = classes, iter = 10, closeid;
+				int[] centcn = new int[classes];
+				int[] cl = new int[vocabSize];
+				double closev, x;
+				double[] cent = new double[classes * layer1Size];
+				for (a = 0; a < vocabSize; a++)
+					cl[a] = a % clcn;
+				for (a = 0; a < iter; a++) {
+					for (b = 0; b < clcn * layer1Size; b++)
+						cent[b] = 0;
+					for (b = 0; b < clcn; b++)
+						centcn[b] = 1;
+					for (c = 0; c < vocabSize; c++) {
+						for (d = 0; d < layer1Size; d++)
+							cent[layer1Size * cl[c] + d] += syn0[c * layer1Size + d];
+						centcn[cl[c]]++;
+					}
+					for (b = 0; b < clcn; b++) {
+						closev = 0;
+						for (c = 0; c < layer1Size; c++) {
+							cent[layer1Size * b + c] /= centcn[b];
+							closev += cent[layer1Size * b + c] * cent[layer1Size * b + c];
+						}
+						closev = Math.sqrt(closev);
+						for (c = 0; c < layer1Size; c++)
+							cent[layer1Size * b + c] /= closev;
+					}
+					for (c = 0; c < vocabSize; c++) {
+						closev = -10;
+						closeid = 0;
+						for (d = 0; d < clcn; d++) {
+							x = 0;
+							for (b = 0; b < layer1Size; b++)
+								x += cent[layer1Size * d + b] * syn0[c * layer1Size + b];
+							if (x > closev) {
+								closev = x;
+								closeid = d;
+							}
+						}
+						cl[c] = closeid;
+					}
+				}
+				// Save the K-means classes
+				for (a = 0; a < vocabSize; a++)
+					dos.writeUTF(String.format("%s %d\n", new String(vocabs[a].getWord()), cl[a]));
+				centcn = null;
+				cent = null;
+				cl = null;
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		} finally {
+			if (dos != null) {
+				try {
+					dos.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
 	}
 
 	public static void main(String[] args) {
