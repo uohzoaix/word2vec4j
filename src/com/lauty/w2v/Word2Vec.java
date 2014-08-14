@@ -1,10 +1,17 @@
 package com.lauty.w2v;
 
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PushbackReader;
+import java.io.RandomAccessFile;
 import java.util.Arrays;
 import java.util.Comparator;
+
+import com.lauty.w2v.util.UnReadRAF;
 
 public class Word2Vec {
 
@@ -67,10 +74,10 @@ public class Word2Vec {
 
 	int[] table;
 	int[] vocabHash;
-	private char[] trainFile = new char[MAX_STRING];
+	private String trainFile = "";
 	private char[] outputFile = new char[MAX_STRING];
-	private char[] saveVocabFile = new char[MAX_STRING];
-	private char[] readVocabFile = new char[MAX_STRING];
+	private String saveVocabFile = "";
+	private String readVocabFile = "";
 	int binary = 0, cbow = 0, debug_mode = 2, window = 5, min_count = 5, num_threads = 1, min_reduce = 1;
 	int vocabMaxSize = 1000, vocabSize = 0, layer1Size = 100;
 	long trainWords = 0, wordCountActual = 0, fileSize = 0, classes = 0;
@@ -100,17 +107,17 @@ public class Word2Vec {
 	}
 
 	// Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-	public void readWord(char[] word, InputStreamReader reader) {
-		PushbackReader pushbackReader = new PushbackReader(reader);
+	public void readWord(char[] word, UnReadRAF unraf) {
+		//PushbackReader pushbackReader = new PushbackReader(reader);
 		int a = 0, ch;
 		try {
-			while ((ch = pushbackReader.read()) != -1) {
+			while ((ch = unraf.read()) != -1) {
 				if (ch == 13)
 					continue;
 				if (ch == ' ' || ch == '\t' || ch == '\n') {
 					if (a > 0) {
 						if (ch == '\n') {
-							pushbackReader.unread(ch);
+							unraf.unread();
 						}
 						break;
 					}
@@ -153,11 +160,11 @@ public class Word2Vec {
 		}
 	}
 
-	public int readWordIndex(InputStreamReader fin) {
+	public int readWordIndex(UnReadRAF unraf) {
 		char[] word = new char[MAX_STRING];
-		readWord(word, fin);
+		readWord(word, unraf);
 		try {
-			if (fin.read() == -1)
+			if (unraf.read() == -1)
 				return -1;
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -255,7 +262,7 @@ public class Word2Vec {
 
 	// Create binary Huffman tree using the word counts
 	// Frequent words will have short uniqe binary codes
-	public void CreateBinaryTree() {
+	public void createBinaryTree() {
 		int a, b, i, min1i, min2i, pos1, pos2;
 		int[] point = new int[MAX_CODE_LENGTH];
 		char[] code = new char[MAX_CODE_LENGTH];
@@ -322,5 +329,125 @@ public class Word2Vec {
 		count = null;
 		binary = null;
 		parentNode = null;
+	}
+
+	public void learnVocabFromTrainFile() {
+		UnReadRAF unraf = null;
+		try {
+			char[] word = new char[MAX_STRING];
+			int a, i;
+			for (a = 0; a < VOCAB_HASH_SIZE; a++)
+				vocabHash[a] = -1;
+			unraf = new UnReadRAF(trainFile, "rb");
+			vocabSize = 0;
+			addWordToVocab("</s>".toCharArray());
+			while (true) {
+				readWord(word, unraf);
+				if (unraf.read() == -1) {
+					break;
+				}
+				trainWords++;
+				if ((debug_mode > 1) && (trainWords % 100000 == 0)) {
+					System.out.printf("%dK%c", trainWords / 1000, 13);
+					System.out.println();
+				}
+				i = searchVocab(word);
+				if (i == -1) {
+					a = addWordToVocab(word);
+					vocabs[a].setCn(1);
+				} else
+					vocabs[i].setCn(vocabs[i].getCn() + 1);
+				if (vocabSize > VOCAB_HASH_SIZE * 0.7)
+					reduceVocab();
+			}
+			sortVocab();
+			if (debug_mode > 0) {
+				System.out.printf("Vocab size: %d\n", vocabSize);
+				System.out.printf("Words in train file: %d\n", trainWords);
+			}
+			fileSize = unraf.getFilePointer();
+		} catch (Exception e) {
+			if (unraf == null) {
+				System.out.println("ERROR: training data file not found!\n");
+				System.exit(1);
+			}
+		} finally {
+			if (unraf != null) {
+				try {
+					unraf.close();
+				} catch (Exception e2) {
+				}
+			}
+		}
+	}
+
+	public void saveVocab() {
+		RandomAccessFile raf = null;
+		try {
+			raf = new RandomAccessFile(saveVocabFile, "wb");
+			for (int i = 0; i < vocabSize; i++) {
+				raf.writeBytes(String.format("%s %d\n", vocabs[i].getWord(), vocabs[i].getCn()));
+			}
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			if (raf != null) {
+				try {
+					raf.close();
+				} catch (Exception e2) {
+				}
+			}
+		}
+	}
+
+	public void readVocab() {
+		UnReadRAF unraf = null;
+		try {
+			int a, i = 0;
+			//char c;
+			char[] word = new char[MAX_STRING];
+			unraf = new UnReadRAF(readVocabFile, "rb");
+			for (a = 0; a < VOCAB_HASH_SIZE; a++)
+				vocabHash[a] = -1;
+			vocabSize = 0;
+			while (true) {
+				readWord(word, unraf);
+				if (unraf.read() == -1) {
+					break;
+				}
+				a = addWordToVocab(word);
+				// fscanf(fin, "%lld%c", &vocab[a].cn, &c);
+				i++;
+			}
+			sortVocab();
+			if (debug_mode > 0) {
+				System.out.printf("Vocab size: %d\n", vocabSize);
+				System.out.printf("Words in train file: %d\n", trainWords);
+			}
+			unraf = new UnReadRAF(trainFile, "rb");
+			unraf.seek(unraf.length());
+			fileSize = unraf.getFilePointer();
+		} catch (Exception e) {
+			e.printStackTrace();
+			if (unraf == null) {
+				System.exit(1);
+			}
+		} finally {
+			if (unraf != null) {
+				try {
+					unraf.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+
+	}
+
+	public static void main(String[] args) {
+		char[] word = new char[] { 'a', 'b', 'c' };
+		System.out.println(String.format("%s %d\n", word, 11));
 	}
 }
