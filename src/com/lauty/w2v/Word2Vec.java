@@ -76,10 +76,10 @@ public class Word2Vec {
 	static int classes = 0, hs = 1, negative = 0, binary = 0, cbow = 0, debug_mode = 2, window = 5, min_count = 5, num_threads = 1, min_reduce = 1, vocabMaxSize = 1000, vocabSize = 0,
 			layer1Size = 100;
 	static long trainWords = 0, wordCountActual = 0, fileSize = 0, start = System.currentTimeMillis();
-	static double alpha = 0.025f, startingAlpha, sample = 0, tableSize = 1e8;
+	static double alpha = 0.025, startingAlpha, sample = 0, tableSize = 1e8;
 	static double[] syn0, syn1, syn1neg, expTable;
 
-	public void initUniGramTable() {
+	public static void initUniGramTable() {
 		int a, i;
 		long trainWordsPow = 0;
 		double d1, power = 0.75f;
@@ -192,7 +192,7 @@ public class Word2Vec {
 	}
 
 	// Sorts the vocabulary by frequency using word counts
-	public void sortVocab() {
+	public static void sortVocab() {
 		int a, size;
 		int hash;
 		// Sort the vocabulary and keep </s> at the first position
@@ -231,7 +231,7 @@ public class Word2Vec {
 	}
 
 	// Reduces the vocabulary by removing infrequent tokens
-	public void reduceVocab() {
+	public static void reduceVocab() {
 		int a, b = 0;
 		int hash;
 		for (a = 0; a < vocabSize; a++)
@@ -256,7 +256,7 @@ public class Word2Vec {
 
 	// Create binary Huffman tree using the word counts
 	// Frequent words will have short uniqe binary codes
-	public void createBinaryTree() {
+	public static void createBinaryTree() {
 		int a, b, i, min1i, min2i, pos1, pos2;
 		int[] point = new int[MAX_CODE_LENGTH];
 		char[] code = new char[MAX_CODE_LENGTH];
@@ -325,7 +325,7 @@ public class Word2Vec {
 		parentNode = null;
 	}
 
-	public void learnVocabFromTrainFile() {
+	public static void learnVocabFromTrainFile() {
 		UnReadRAF unraf = null;
 		try {
 			char[] word = new char[MAX_STRING];
@@ -375,7 +375,7 @@ public class Word2Vec {
 		}
 	}
 
-	public void saveVocab() {
+	public static void saveVocab() {
 		RandomAccessFile raf = null;
 		try {
 			raf = new RandomAccessFile(saveVocabFile, "wb");
@@ -396,7 +396,7 @@ public class Word2Vec {
 		}
 	}
 
-	public void readVocab() {
+	public static void readVocab() {
 		UnReadRAF unraf = null;
 		try {
 			int a, i = 0;
@@ -440,7 +440,7 @@ public class Word2Vec {
 
 	}
 
-	public void initNet() {
+	public static void initNet() {
 		int a, b;
 		syn0 = new double[vocabSize * layer1Size];
 		if (hs != 0) {
@@ -462,7 +462,7 @@ public class Word2Vec {
 		createBinaryTree();
 	}
 
-	public class TrainModelThread extends Thread {
+	public static class TrainModelThread extends Thread {
 		final long id;
 
 		public TrainModelThread(long id) {
@@ -713,7 +713,7 @@ public class Word2Vec {
 
 	}
 
-	public void trainModel() {
+	public static void trainModel() {
 		int a, b, c, d;
 		DataOutputStream dos = null;
 		try {
@@ -814,8 +814,103 @@ public class Word2Vec {
 		}
 	}
 
+	public static int argPos(String str, int num, String[] args) {
+		int a;
+		for (a = 1; a < num; a++)
+			if (!str.equals(args[a])) {
+				if (a == num - 1) {
+					System.out.printf("Argument missing for %s\n", str);
+					System.exit(1);
+				}
+				return a;
+			}
+		return -1;
+	}
+
 	public static void main(String[] args) {
-		char[] word = new char[] { 'a', 'b', 'c' };
-		System.out.println(String.format("%s %d\n", word, 11));
+		int i;
+		if (args.length == 0) {
+			System.out.println("WORD VECTOR estimation toolkit v 0.1b\n\n");
+			System.out.println("Options:\n");
+			System.out.println("Parameters for training:\n");
+			System.out.println("\t-train <file>\n");
+			System.out.println("\t\tUse text data from <file> to train the model\n");
+			System.out.println("\t-output <file>\n");
+			System.out.println("\t\tUse <file> to save the resulting word vectors / word clusters\n");
+			System.out.println("\t-size <int>\n");
+			System.out.println("\t\tSet size of word vectors; default is 100\n");
+			System.out.println("\t-window <int>\n");
+			System.out.println("\t\tSet max skip length between words; default is 5\n");
+			System.out.println("\t-sample <float>\n");
+			System.out.println("\t\tSet threshold for occurrence of words. Those that appear with higher frequency");
+			System.out.println(" in the training data will be randomly down-sampled; default is 0 (off), useful value is 1e-5\n");
+			System.out.println("\t-hs <int>\n");
+			System.out.println("\t\tUse Hierarchical Softmax; default is 1 (0 = not used)\n");
+			System.out.println("\t-negative <int>\n");
+			System.out.println("\t\tNumber of negative examples; default is 0, common values are 5 - 10 (0 = not used)\n");
+			System.out.println("\t-threads <int>\n");
+			System.out.println("\t\tUse <int> threads (default 1)\n");
+			System.out.println("\t-min-count <int>\n");
+			System.out.println("\t\tThis will discard words that appear less than <int> times; default is 5\n");
+			System.out.println("\t-alpha <float>\n");
+			System.out.println("\t\tSet the starting learning rate; default is 0.025\n");
+			System.out.println("\t-classes <int>\n");
+			System.out.println("\t\tOutput word classes rather than word vectors; default number of classes is 0 (vectors are written)\n");
+			System.out.println("\t-debug <int>\n");
+			System.out.println("\t\tSet the debug mode (default = 2 = more info during training)\n");
+			System.out.println("\t-binary <int>\n");
+			System.out.println("\t\tSave the resulting vectors in binary moded; default is 0 (off)\n");
+			System.out.println("\t-save-vocab <file>\n");
+			System.out.println("\t\tThe vocabulary will be saved to <file>\n");
+			System.out.println("\t-read-vocab <file>\n");
+			System.out.println("\t\tThe vocabulary will be read from <file>, not constructed from the training data\n");
+			System.out.println("\t-cbow <int>\n");
+			System.out.println("\t\tUse the continuous bag of words model; default is 0 (skip-gram model)\n");
+			System.out.println("\nExamples:\n");
+			System.out.println("./word2vec -train data.txt -output vec.txt -debug 2 -size 200 -window 5 -sample 1e-4 -negative 5 -hs 0 -binary 0 -cbow 1\n\n");
+			return;
+		}
+		int num = args.length;
+		if ((i = argPos("-size", num, args)) > 0)
+			layer1Size = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-train", num, args)) > 0)
+			trainFile = args[i + 1];
+		if ((i = argPos("-save-vocab", num, args)) > 0)
+			saveVocabFile = args[i + 1];
+		if ((i = argPos("-read-vocab", num, args)) > 0)
+			readVocabFile = args[i + 1];
+		if ((i = argPos("-debug", num, args)) > 0)
+			debug_mode = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-binary", num, args)) > 0)
+			binary = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-cbow", num, args)) > 0)
+			cbow = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-alpha", num, args)) > 0)
+			alpha = Double.valueOf(args[i + 1]);
+		if ((i = argPos("-output", num, args)) > 0)
+			outputFile = args[i + 1];
+		if ((i = argPos("-window", num, args)) > 0)
+			window = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-sample", num, args)) > 0)
+			sample = Double.valueOf(args[i + 1]);
+		if ((i = argPos("-hs", num, args)) > 0)
+			hs = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-negative", num, args)) > 0)
+			negative = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-threads", num, args)) > 0)
+			num_threads = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-min-count", num, args)) > 0)
+			min_count = Integer.valueOf(args[i + 1]);
+		if ((i = argPos("-classes", num, args)) > 0)
+			classes = Integer.valueOf(args[i + 1]);
+		vocabs = new VocabWord[vocabMaxSize];
+		vocabHash = new int[VOCAB_HASH_SIZE];
+		expTable = new double[EXP_TABLE_SIZE + 1];
+		for (i = 0; i < EXP_TABLE_SIZE; i++) {
+			expTable[i] = Math.exp((i / EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
+			expTable[i] = expTable[i] / (expTable[i] + 1); // Precompute f(x) = x / (x + 1)
+		}
+		trainModel();
+		return;
 	}
 }
