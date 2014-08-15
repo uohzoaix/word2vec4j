@@ -6,6 +6,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Random;
@@ -79,6 +80,19 @@ public class Word2Vec {
 	static double alpha = 0.025, startingAlpha, sample = 0, tableSize = 1e8;
 	static double[] syn0, syn1, syn1neg, expTable;
 
+	public static void initWV() {
+		vocabs = new VocabWord[vocabMaxSize];
+		for (int i = 0; i < vocabMaxSize; i++) {
+			vocabs[i] = new VocabWord();
+		}
+		vocabHash = new int[VOCAB_HASH_SIZE];
+		expTable = new double[EXP_TABLE_SIZE + 1];
+		for (int i = 0; i < EXP_TABLE_SIZE; i++) {
+			expTable[i] = Math.exp((i / EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
+			expTable[i] = expTable[i] / (expTable[i] + 1); // Precompute f(x) = x / (x + 1)
+		}
+	}
+
 	public static void initUniGramTable() {
 		int a, i;
 		long trainWordsPow = 0;
@@ -134,23 +148,39 @@ public class Word2Vec {
 
 	// Returns hash value of a word
 	public static int getWordHash(char[] word) {
-		int a, hash = 0;
-		for (a = 0; a < word.length; a++)
-			hash = hash * 257 + word[a];
-		hash = hash % VOCAB_HASH_SIZE;
-		return hash;
+		int a;
+		BigInteger hash = BigInteger.ZERO;
+		for (a = 0; a < word.length; a++) {
+			if (word[a] != 0) {
+				hash = hash.multiply(new BigInteger(257 + "")).add(new BigInteger(Character.getNumericValue(word[a]) + ""));
+			}
+		}
+		hash = hash.mod(new BigInteger(VOCAB_HASH_SIZE + ""));
+		return hash.intValue();
 	}
+
+	public static String chword = "";
 
 	// Returns position of a word in the vocabulary; if the word is not found, returns -1
 	public static int searchVocab(char[] word) {
+		chword = new String(word);
 		int hash = getWordHash(word);
 		while (true) {
-			if (vocabHash[hash] == -1)
-				return -1;
-			if (new String(word).compareTo(new String(vocabs[vocabHash[hash]].getWord())) == 0) {
-				return vocabHash[hash];
+			try {
+				if (vocabHash[hash] == -1)
+					return -1;
+				try {
+
+					if (chword.compareTo(new String(vocabs[vocabHash[hash]].getWord())) == 0) {
+						return vocabHash[hash];
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+				hash = (hash + 1) % VOCAB_HASH_SIZE;
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
-			hash = (hash + 1) % VOCAB_HASH_SIZE;
 		}
 	}
 
@@ -171,13 +201,21 @@ public class Word2Vec {
 		int hash, length = word.length + 1;
 		if (length > MAX_STRING)
 			length = MAX_STRING;
+		if (vocabSize == 1975) {
+			System.out.println(vocabSize);
+		}
 		vocabs[vocabSize].setWord(word);
 		vocabs[vocabSize].setCn(0);
 		vocabSize++;
 		// Reallocate memory if needed
 		if (vocabSize + 2 >= vocabMaxSize) {
 			vocabMaxSize += 1000;
-			vocabs = new VocabWord[vocabMaxSize];
+			VocabWord[] newvocabs = new VocabWord[vocabMaxSize];
+			System.arraycopy(vocabs, 0, newvocabs, 0, vocabMaxSize - 1000);
+			for (int i = vocabMaxSize - 1000; i < vocabMaxSize; i++) {
+				newvocabs[i] = new VocabWord();
+			}
+			vocabs = newvocabs;
 			//vocabs = (struct vocab_word *)realloc(vocab, vocab_max_size * sizeof(struct vocab_word));
 		}
 		hash = getWordHash(word);
@@ -211,10 +249,10 @@ public class Word2Vec {
 			// Words occuring less than min_count times will be discarded from the vocab
 			if (vocabs[a].getCn() < min_count) {
 				vocabSize--;
-				vocabs[vocabSize].setWord(null);
+				vocabs[vocabSize].setWord(new char[] {});
 			} else {
 				// Hash will be re-computed, as after the sorting it is not actual
-				hash = getWordHash(vocabs[a].word);
+				hash = getWordHash(vocabs[a].getWord());
 				while (vocabHash[hash] != -1)
 					hash = (hash + 1) % VOCAB_HASH_SIZE;
 				vocabHash[hash] = a;
@@ -240,13 +278,13 @@ public class Word2Vec {
 				vocabs[b].setWord(vocabs[a].getWord());
 				b++;
 			} else
-				vocabs[a].setWord(null);
+				vocabs[a].setWord(new char[] {});
 		vocabSize = b;
 		for (a = 0; a < VOCAB_HASH_SIZE; a++)
 			vocabHash[a] = -1;
 		for (a = 0; a < vocabSize; a++) {
 			// Hash will be re-computed, as it is not actual
-			hash = getWordHash(vocabs[a].word);
+			hash = getWordHash(vocabs[a].getWord());
 			while (vocabHash[hash] != -1)
 				hash = (hash + 1) % VOCAB_HASH_SIZE;
 			vocabHash[hash] = a;
@@ -332,7 +370,7 @@ public class Word2Vec {
 			int a, i;
 			for (a = 0; a < VOCAB_HASH_SIZE; a++)
 				vocabHash[a] = -1;
-			unraf = new UnReadRAF(trainFile, "rb");
+			unraf = new UnReadRAF(trainFile, "r");
 			vocabSize = 0;
 			addWordToVocab("</s>".toCharArray());
 			while (true) {
@@ -343,12 +381,15 @@ public class Word2Vec {
 				trainWords++;
 				if ((debug_mode > 1) && (trainWords % 100000 == 0)) {
 					System.out.printf("%dK%c", trainWords / 1000, 13);
-					System.out.println();
 				}
 				i = searchVocab(word);
 				if (i == -1) {
-					a = addWordToVocab(word);
-					vocabs[a].setCn(1);
+					try {
+						a = addWordToVocab(word);
+						vocabs[a].setCn(1);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
 				} else
 					vocabs[i].setCn(vocabs[i].getCn() + 1);
 				if (vocabSize > VOCAB_HASH_SIZE * 0.7)
@@ -361,6 +402,7 @@ public class Word2Vec {
 			}
 			fileSize = unraf.getFilePointer();
 		} catch (Exception e) {
+			e.printStackTrace();
 			if (unraf == null) {
 				System.out.println("ERROR: training data file not found!\n");
 				System.exit(1);
@@ -402,7 +444,7 @@ public class Word2Vec {
 			int a, i = 0;
 			//char c;
 			char[] word = new char[MAX_STRING];
-			unraf = new UnReadRAF(readVocabFile, "rb");
+			unraf = new UnReadRAF(readVocabFile, "r");
 			for (a = 0; a < VOCAB_HASH_SIZE; a++)
 				vocabHash[a] = -1;
 			vocabSize = 0;
@@ -420,7 +462,7 @@ public class Word2Vec {
 				System.out.printf("Vocab size: %d\n", vocabSize);
 				System.out.printf("Words in train file: %d\n", trainWords);
 			}
-			unraf = new UnReadRAF(trainFile, "rb");
+			unraf = new UnReadRAF(trainFile, "r");
 			unraf.seek(unraf.length());
 			fileSize = unraf.getFilePointer();
 		} catch (Exception e) {
@@ -480,7 +522,7 @@ public class Word2Vec {
 
 			UnReadRAF unraf = null;
 			try {
-				unraf = new UnReadRAF(trainFile, "rb");
+				unraf = new UnReadRAF(trainFile, "r");
 				unraf.seek(fileSize / num_threads * id);
 				while (true) {
 					if (word_count - last_word_count > 10000) {
@@ -816,8 +858,8 @@ public class Word2Vec {
 
 	public static int argPos(String str, int num, String[] args) {
 		int a;
-		for (a = 1; a < num; a++)
-			if (!str.equals(args[a])) {
+		for (a = 0; a < num; a++)
+			if (str.equals(args[a])) {
 				if (a == num - 1) {
 					System.out.printf("Argument missing for %s\n", str);
 					System.exit(1);
@@ -827,7 +869,7 @@ public class Word2Vec {
 		return -1;
 	}
 
-	public static void main(String[] args) {
+	public static void beginTrain(String[] args) {
 		int i;
 		if (args.length == 0) {
 			System.out.println("WORD VECTOR estimation toolkit v 0.1b\n\n");
@@ -871,46 +913,44 @@ public class Word2Vec {
 			return;
 		}
 		int num = args.length;
-		if ((i = argPos("-size", num, args)) > 0)
+		if ((i = argPos("-size", num, args)) >= 0)
 			layer1Size = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-train", num, args)) > 0)
+		if ((i = argPos("-train", num, args)) >= 0)
 			trainFile = args[i + 1];
-		if ((i = argPos("-save-vocab", num, args)) > 0)
+		if ((i = argPos("-save-vocab", num, args)) >= 0)
 			saveVocabFile = args[i + 1];
-		if ((i = argPos("-read-vocab", num, args)) > 0)
+		if ((i = argPos("-read-vocab", num, args)) >= 0)
 			readVocabFile = args[i + 1];
-		if ((i = argPos("-debug", num, args)) > 0)
+		if ((i = argPos("-debug", num, args)) >= 0)
 			debug_mode = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-binary", num, args)) > 0)
+		if ((i = argPos("-binary", num, args)) >= 0)
 			binary = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-cbow", num, args)) > 0)
+		if ((i = argPos("-cbow", num, args)) >= 0)
 			cbow = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-alpha", num, args)) > 0)
+		if ((i = argPos("-alpha", num, args)) >= 0)
 			alpha = Double.valueOf(args[i + 1]);
-		if ((i = argPos("-output", num, args)) > 0)
+		if ((i = argPos("-output", num, args)) >= 0)
 			outputFile = args[i + 1];
-		if ((i = argPos("-window", num, args)) > 0)
+		if ((i = argPos("-window", num, args)) >= 0)
 			window = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-sample", num, args)) > 0)
+		if ((i = argPos("-sample", num, args)) >= 0)
 			sample = Double.valueOf(args[i + 1]);
-		if ((i = argPos("-hs", num, args)) > 0)
+		if ((i = argPos("-hs", num, args)) >= 0)
 			hs = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-negative", num, args)) > 0)
+		if ((i = argPos("-negative", num, args)) >= 0)
 			negative = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-threads", num, args)) > 0)
+		if ((i = argPos("-threads", num, args)) >= 0)
 			num_threads = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-min-count", num, args)) > 0)
+		if ((i = argPos("-min-count", num, args)) >= 0)
 			min_count = Integer.valueOf(args[i + 1]);
-		if ((i = argPos("-classes", num, args)) > 0)
+		if ((i = argPos("-classes", num, args)) >= 0)
 			classes = Integer.valueOf(args[i + 1]);
-		vocabs = new VocabWord[vocabMaxSize];
-		vocabHash = new int[VOCAB_HASH_SIZE];
-		expTable = new double[EXP_TABLE_SIZE + 1];
-		for (i = 0; i < EXP_TABLE_SIZE; i++) {
-			expTable[i] = Math.exp((i / EXP_TABLE_SIZE * 2 - 1) * MAX_EXP); // Precompute the exp() table
-			expTable[i] = expTable[i] / (expTable[i] + 1); // Precompute f(x) = x / (x + 1)
-		}
 		trainModel();
-		return;
+	}
+
+	public static void main(String[] args) {
+		initWV();
+		//-train resultbig.txt -output vectors.bin -cbow 0 -size 200 -window 5 -negative 0 -hs 1 -sample 1e-3 -threads 12 -binary 1
+		beginTrain(args);
 	}
 }
