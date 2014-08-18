@@ -1,8 +1,13 @@
 package com.lauty.w2v;
+
 import java.net.URLDecoder;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Calendar;
 
 public class DecodePrice {
 
@@ -19,6 +24,9 @@ public class DecodePrice {
 	private static final Integer ENCODEPRICE_OFFSITE = BIDID_OFFSITE + BIDID_LENGTH;
 	private static final Integer CRC_OFFSITE = ENCODEPRICE_OFFSITE + ENCODEPRICE_LENGTH;
 	private static final Integer MAGICTIME_OFFSET = 7;
+
+	private static final DateFormat formatter = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+	private static final Calendar calendar = Calendar.getInstance();
 
 	private static final byte[] G_KEY = { (byte) 0xf7, (byte) 0xdb, (byte) 0xeb, 0x73, 0x5b, 0x7a, 0x07, (byte) 0xf1, (byte) 0xcf, (byte) 0xca, 0x79, (byte) 0xcc, 0x1d, (byte) 0xfe, 0x4f, (byte) 0xa4 };
 
@@ -46,7 +54,7 @@ public class DecodePrice {
 	// variable and bidding time will return to time variable
 	// If this function returns false, it means format error or checksum
 	// error, realPrice variable and time variable are invalid
-	public static Integer decodePrice(byte[] src, Integer realPrice, String time) throws Exception {
+	public static PriceTime decodePrice(byte[] src, PriceTime pt) throws Exception {
 		// Get version and check
 		int v = src[0];
 		if (v != 1) {
@@ -74,9 +82,9 @@ public class DecodePrice {
 		int price = fromByteArray(p1);
 		// Big endian needs reverse price by byte
 		if (IS_BIG_ENDIAN) {
-			realPrice = swab32(price);
+			pt.setPrice(swab32(price));
 		} else {
-			realPrice = price;
+			pt.setPrice(price);
 		}
 
 		// Calc crc and compare with src
@@ -107,8 +115,11 @@ public class DecodePrice {
 				break;
 			}
 		}
-		//time = new String(Arrays.copyOfRange(src, MAGICTIME_OFFSET, src.length));
-		return realPrice;
+		long mills = ByteBuffer.wrap(Arrays.copyOfRange(src, MAGICTIME_OFFSET, src.length)).getInt();
+		mills = mills * 1000;
+		calendar.setTimeInMillis(mills);
+		pt.setTime(formatter.format(calendar.getTime()));
+		return pt;
 	}
 
 	public static int fromByteArray(byte[] bytes) {
@@ -147,6 +158,39 @@ public class DecodePrice {
 		return buffer;
 	}
 
+	static class PriceTime {
+		private Integer price;
+		private String time;
+
+		public PriceTime(Integer price, String time) {
+			super();
+			this.price = price;
+			this.time = time;
+		}
+
+		public Integer getPrice() {
+			return price;
+		}
+
+		public void setPrice(Integer price) {
+			this.price = price;
+		}
+
+		public String getTime() {
+			return time;
+		}
+
+		public void setTime(String time) {
+			this.time = time;
+		}
+
+		@Override
+		public String toString() {
+			return "price:" + getPrice() + ",time:" + getTime();
+		}
+
+	}
+
 	public static void main(String[] args) throws Exception {
 		byte src[] = "AQtlz3ImkFBRQ5MAAADFkK5AX2YJU4kNig%3D%3D".getBytes();
 		String origstr = URLDecoder.decode(new String(src), "UTF-8");
@@ -158,7 +202,7 @@ public class DecodePrice {
 		}
 		Integer price = null;
 		String time = null;
-		System.out.println(decodePrice(orig, price, time));
+		System.out.println(decodePrice(orig, new PriceTime(price, time)));
 		//if (decodePrice(orig, price, time)) {
 		//struct tm tm;
 		//localtime_r(&time, &tm);
