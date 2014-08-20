@@ -10,6 +10,7 @@ import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.List;
 import java.util.Random;
 
 import com.lauty.w2v.util.UnReadRAF;
@@ -24,10 +25,11 @@ public class Word2Vec {
 	private static final Integer VOCAB_HASH_SIZE = 30000000;
 
 	public static class VocabWord {
-		Integer cn;
-		int[] point;
-		byte[] word, code;
-		Integer codeLen;
+		Integer cn = 0;
+		int[] point = new int[MAX_CODE_LENGTH];
+		byte[] code = new byte[MAX_CODE_LENGTH];
+		byte[] word = new byte[] {};
+		Integer codeLen = 0;
 
 		public Integer getCn() {
 			return cn;
@@ -79,7 +81,7 @@ public class Word2Vec {
 			layer1Size = 100;
 	static long trainWords = 0, wordCountActual = 0, fileSize = 0, start = System.currentTimeMillis();
 	static double alpha = 0.025, startingAlpha, sample = 0, tableSize = 1e8;
-	static double[][] syn0, syn1, syn1neg;
+	static double[] syn0, syn1, syn1neg;
 	static double[] expTable;
 
 	public static void initWV() {
@@ -175,7 +177,7 @@ public class Word2Vec {
 					return -1;
 				try {
 
-					if (chword.compareTo(new String(vocabs[vocabHash[hash]].getWord())) == 0) {
+					if (chword.equals(new String(vocabs[vocabHash[hash]].getWord()))) {
 						return vocabHash[hash];
 					}
 				} catch (Exception e) {
@@ -190,14 +192,14 @@ public class Word2Vec {
 
 	public static int readWordIndex(UnReadRAF unraf) {
 		byte[] word = new byte[MAX_STRING];
-		readWord(word, unraf);
+		int len = readWord(word, unraf);
 		try {
 			if (unraf.read() == -1)
 				return -1;
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		return searchVocab(word);
+		return searchVocab(Arrays.copyOfRange(word, 0, len));
 	}
 
 	// Adds a word to the vocabulary
@@ -232,6 +234,9 @@ public class Word2Vec {
 
 	// Sorts the vocabulary by frequency using word counts
 	public static void sortVocab() {
+		List<VocabWord> vocabList = Arrays.asList(vocabs);
+		vocabList.remove(null);
+		vocabs = (VocabWord[]) vocabList.toArray();
 		int a, size;
 		int hash;
 		// Sort the vocabulary and keep </s> at the first position
@@ -260,13 +265,13 @@ public class Word2Vec {
 				trainWords += vocabs[a].cn;
 			}
 		}
-		vocabs = new VocabWord[vocabSize + 1];
+		//vocabs = new VocabWord[vocabSize + 1];
 		// vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
 		// Allocate memory for the binary tree construction
-		for (a = 0; a < vocabSize; a++) {
-			vocabs[a].setCode(new byte[MAX_CODE_LENGTH]);
-			vocabs[a].setPoint(new int[MAX_CODE_LENGTH]);
-		}
+		//for (a = 0; a < vocabSize; a++) {
+		//	vocabs[a].setCode(new byte[MAX_CODE_LENGTH]);
+		//	vocabs[a].setPoint(new int[MAX_CODE_LENGTH]);
+		//}
 	}
 
 	// Reduces the vocabulary by removing infrequent tokens
@@ -399,10 +404,12 @@ public class Word2Vec {
 				if (vocabSize > VOCAB_HASH_SIZE * 0.7)
 					reduceVocab();
 			}
+			System.out.println(new Date() + ",开始sort,vocab_size=" + vocabSize);
 			sortVocab();
+			System.out.println(new Date() + ",结束sort,vocab_size=" + vocabSize);
 			if (debug_mode > 0) {
-				System.out.printf("Vocab size: %d\n", vocabSize);
-				System.out.printf("Words in train file: %d\n", trainWords);
+				System.out.println(String.format("Vocab size: %d\n", vocabSize));
+				System.out.println(String.format("Words in train file: %d\n", trainWords));
 			}
 			fileSize = unraf.getFilePointer();
 		} catch (Exception e) {
@@ -453,11 +460,11 @@ public class Word2Vec {
 				vocabHash[a] = -1;
 			vocabSize = 0;
 			while (true) {
-				readWord(word, unraf);
+				int len = readWord(word, unraf);
 				if (unraf.read() == -1) {
 					break;
 				}
-				a = addWordToVocab(word);
+				a = addWordToVocab(Arrays.copyOfRange(word, 0, len));
 				// fscanf(fin, "%lld%c", &vocab[a].cn, &c);
 				i++;
 			}
@@ -489,26 +496,27 @@ public class Word2Vec {
 	public static void initNet() {
 		try {
 			int a, b;
-			syn0 = new double[vocabSize][layer1Size];
+			syn0 = new double[vocabSize * layer1Size];
+			//syn0 = new double[vocabSize][layer1Size];
 			if (hs != 0) {
-				syn1 = new double[vocabSize][layer1Size];
+				syn1 = new double[vocabSize * layer1Size];
 				for (b = 0; b < layer1Size; b++)
 					for (a = 0; a < vocabSize; a++)
-						syn1[a][b] = 0;
-				//syn1[a * layer1Size + b] = 0;
+						//syn1[a][b] = 0;
+						syn1[a * layer1Size + b] = 0;
 			}
 			if (negative > 0) {
-				syn1neg = new double[vocabSize][layer1Size];
+				syn1neg = new double[vocabSize * layer1Size];
 				for (b = 0; b < layer1Size; b++)
 					for (a = 0; a < vocabSize; a++)
-						syn1neg[a][b] = 0;
-				//syn1neg[a * layer1Size + b] = 0;
+						//syn1neg[a][b] = 0;
+						syn1neg[a * layer1Size + b] = 0;
 			}
 			Random random = new Random();
 			for (b = 0; b < layer1Size; b++)
 				for (a = 0; a < vocabSize; a++)
-					syn0[a][b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
-			//syn0[a * layer1Size + b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
+					//syn0[a][b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
+					syn0[a * layer1Size + b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
 			createBinaryTree();
 		} catch (Exception e) {
 			System.out.println(new Date() + "-" + vocabSize);
@@ -602,8 +610,8 @@ public class Word2Vec {
 								if (last_word == -1)
 									continue;
 								for (c = 0; c < layer1Size; c++)
-									neu1[c] += syn0[last_word][c];
-								//neu1[c] += syn0[c + last_word * layer1Size];
+									//neu1[c] += syn0[last_word][c];
+									neu1[c] += syn0[c + last_word * layer1Size];
 							}
 						if (hs != 0)
 							for (d = 0; d < vocabs[word].getCodeLen(); d++) {
@@ -611,7 +619,8 @@ public class Word2Vec {
 								l2 = vocabs[word].getPoint()[d] * layer1Size;
 								// Propagate hidden -> output
 								for (c = 0; c < layer1Size; c++)
-									f += neu1[c] * syn1[l2][c];
+									//f += neu1[c] * syn1[l2][c];
+									f += neu1[c] * syn1[c + l2];
 								if (f <= -MAX_EXP)
 									continue;
 								else if (f >= MAX_EXP)
@@ -622,10 +631,12 @@ public class Word2Vec {
 								g = (1 - vocabs[word].getCode()[d] - f) * alpha;
 								// Propagate errors output -> hidden
 								for (c = 0; c < layer1Size; c++)
-									neu1e[c] += g * syn1[l2][c];
+									//neu1e[c] += g * syn1[l2][c];
+									neu1e[c] += g * syn1[c + l2];
 								// Learn weights hidden -> output
 								for (c = 0; c < layer1Size; c++)
-									syn1[l2][c] += g * neu1[c];
+									//syn1[l2][c] += g * neu1[c];
+									syn1[c + l2] += g * neu1[c];
 							}
 						// NEGATIVE SAMPLING
 						if (negative > 0)
@@ -645,7 +656,8 @@ public class Word2Vec {
 								l2 = target * layer1Size;
 								f = 0;
 								for (c = 0; c < layer1Size; c++)
-									f += neu1[c] * syn1neg[l2][c];
+									//f += neu1[c] * syn1neg[l2][c];
+									f += neu1[c] * syn1neg[c + l2];
 								if (f > MAX_EXP)
 									g = (label - 1) * alpha;
 								else if (f < -MAX_EXP)
@@ -653,9 +665,11 @@ public class Word2Vec {
 								else
 									g = (label - expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
 								for (c = 0; c < layer1Size; c++)
-									neu1e[c] += g * syn1neg[l2][c];
+									//neu1e[c] += g * syn1neg[l2][c];
+									neu1e[c] += g * syn1neg[c + l2];
 								for (c = 0; c < layer1Size; c++)
-									syn1neg[l2][c] += g * neu1[c];
+									//syn1neg[l2][c] += g * neu1[c];
+									syn1neg[c + l2] += g * neu1[c];
 							}
 						// hidden -> in
 						for (a = b; a < window * 2 + 1 - b; a++)
@@ -669,7 +683,8 @@ public class Word2Vec {
 								if (last_word == -1)
 									continue;
 								for (c = 0; c < layer1Size; c++)
-									syn0[last_word][c] += neu1e[c];
+									//syn0[last_word][c] += neu1e[c];
+									syn0[c + last_word * layer1Size] += neu1e[c];
 							}
 					} else { //train skip-gram
 						for (a = b; a < window * 2 + 1 - b; a++)
@@ -692,7 +707,8 @@ public class Word2Vec {
 										l2 = vocabs[word].getPoint()[d] * layer1Size;
 										// Propagate hidden -> output
 										for (c = 0; c < layer1Size; c++)
-											f += syn0[l1][c] * syn1[l2][c];
+											//f += syn0[l1][c] * syn1[l2][c];
+											f += syn0[c + l1] * syn1[c + l2];
 										if (f <= -MAX_EXP)
 											continue;
 										else if (f >= MAX_EXP)
@@ -703,10 +719,12 @@ public class Word2Vec {
 										g = (1 - vocabs[word].getCode()[d] - f) * alpha;
 										// Propagate errors output -> hidden
 										for (c = 0; c < layer1Size; c++)
-											neu1e[c] += g * syn1[l2][c];
+											//neu1e[c] += g * syn1[l2][c];
+											neu1e[c] += g * syn1[c + l2];
 										// Learn weights hidden -> output
 										for (c = 0; c < layer1Size; c++)
-											syn1[l2][c] += g * syn0[l1][c];
+											//syn1[l2][c] += g * syn0[l1][c];
+											syn1[c + l2] += g * syn0[c + l1];
 									}
 								// NEGATIVE SAMPLING
 								if (negative > 0)
@@ -726,7 +744,8 @@ public class Word2Vec {
 										l2 = target * layer1Size;
 										f = 0;
 										for (c = 0; c < layer1Size; c++)
-											f += syn0[l1][c] * syn1neg[l2][c];
+											//f += syn0[l1][c] * syn1neg[l2][c];
+											f += syn0[c + l1] * syn1neg[c + l2];
 										if (f > MAX_EXP)
 											g = (label - 1) * alpha;
 										else if (f < -MAX_EXP)
@@ -734,13 +753,16 @@ public class Word2Vec {
 										else
 											g = (label - expTable[(int) ((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
 										for (c = 0; c < layer1Size; c++)
-											neu1e[c] += g * syn1neg[l2][c];
+											//neu1e[c] += g * syn1neg[l2][c];
+											neu1e[c] += g * syn1neg[c + l2];
 										for (c = 0; c < layer1Size; c++)
-											syn1neg[l2][c] += g * syn0[l1][c];
+											//syn1neg[l2][c] += g * syn0[l1][c];
+											syn1neg[c + l2] += g * syn0[c + l1];
 									}
 								// Learn weights input -> hidden
 								for (c = 0; c < layer1Size; c++)
-									syn0[l1][c] += neu1e[c];
+									//syn0[l1][c] += neu1e[c];
+									syn0[c + l1] += neu1e[c];
 							}
 					}
 					sentence_position++;
@@ -799,7 +821,7 @@ public class Word2Vec {
 					dos.writeUTF(new String(vocabs[a].getWord()));
 					if (binary != 0)
 						for (b = 0; b < layer1Size; b++)
-							dos.writeDouble(syn0[a][b]);
+							dos.writeDouble(syn0[a * layer1Size + b]);
 					else
 						for (b = 0; b < layer1Size; b++)
 							dos.writeUTF(syn0[a * layer1Size + b] + "");
@@ -821,7 +843,7 @@ public class Word2Vec {
 						centcn[b] = 1;
 					for (c = 0; c < vocabSize; c++) {
 						for (d = 0; d < layer1Size; d++)
-							cent[layer1Size * cl[c] + d] += syn0[c][d];
+							cent[layer1Size * cl[c] + d] += syn0[c * layer1Size + d];
 						centcn[cl[c]]++;
 					}
 					for (b = 0; b < clcn; b++) {
@@ -840,7 +862,7 @@ public class Word2Vec {
 						for (d = 0; d < clcn; d++) {
 							x = 0;
 							for (b = 0; b < layer1Size; b++)
-								x += cent[layer1Size * d + b] * syn0[c][b];
+								x += cent[layer1Size * d + b] * syn0[c * layer1Size + b];
 							if (x > closev) {
 								closev = x;
 								closeid = d;
