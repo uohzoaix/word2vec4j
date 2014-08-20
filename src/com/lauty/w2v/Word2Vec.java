@@ -550,8 +550,8 @@ public class Word2Vec {
 						last_word_count = word_count;
 						if ((debug_mode > 1)) {
 							now = System.currentTimeMillis();
-							System.out.printf("%cAlpha: %f  Progress: %.2f%%  Words/thread/sec: %.2fk  ", 13, alpha, wordCountActual / (float) (trainWords + 1) * 100, wordCountActual
-									/ ((float) (now - start + 1) / 1000));
+							System.out.printf("%cAlpha: %f  Progress: %.2f%%  wordCountActual: %d  Words/thread/sec: %.2fk  ", 13, alpha, wordCountActual / (float) (trainWords + 1) * 100,
+									wordCountActual, wordCountActual / ((float) (now - start + 1) / 1000));
 							//fflush(stdout);
 						}
 						alpha = startingAlpha * (1 - wordCountActual / (trainWords + 1));
@@ -816,7 +816,9 @@ public class Word2Vec {
 			dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile)));
 			if (classes == 0) {
 				// Save the word vectors
-				dos.writeUTF(String.format("%d %d\n", vocabSize, layer1Size));
+				dos.writeInt(vocabSize);
+				dos.writeInt(layer1Size);
+				//dos.writeUTF(String.format("%d %d\n", vocabSize, layer1Size));
 				for (a = 0; a < vocabSize; a++) {
 					dos.writeUTF(new String(vocabs[a].getWord()));
 					if (binary != 0)
@@ -825,7 +827,7 @@ public class Word2Vec {
 					else
 						for (b = 0; b < layer1Size; b++)
 							dos.writeUTF(syn0[a * layer1Size + b] + "");
-					dos.writeUTF("\n");
+					//dos.writeUTF("\n");
 				}
 			} else {
 				// Run K-means on the word vectors
