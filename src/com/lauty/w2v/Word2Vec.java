@@ -9,6 +9,7 @@ import java.io.RandomAccessFile;
 import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.Random;
 
 import com.lauty.w2v.util.UnReadRAF;
@@ -25,7 +26,7 @@ public class Word2Vec {
 	public static class VocabWord {
 		Integer cn;
 		int[] point;
-		char[] word, code;
+		byte[] word, code;
 		Integer codeLen;
 
 		public Integer getCn() {
@@ -44,19 +45,19 @@ public class Word2Vec {
 			this.point = point;
 		}
 
-		public char[] getWord() {
+		public byte[] getWord() {
 			return word;
 		}
 
-		public void setWord(char[] word) {
+		public void setWord(byte[] word) {
 			this.word = word;
 		}
 
-		public char[] getCode() {
+		public byte[] getCode() {
 			return code;
 		}
 
-		public void setCode(char[] code) {
+		public void setCode(byte[] code) {
 			this.code = code;
 		}
 
@@ -116,8 +117,8 @@ public class Word2Vec {
 	}
 
 	// Reads a single word from a file, assuming space + tab + EOL to be word boundaries
-	public static void readWord(char[] word, UnReadRAF unraf) {
-		//PushbackReader pushbackReader = new PushbackReader(reader);
+	public static Integer readWord(byte[] word, UnReadRAF unraf) {
+		Arrays.fill(word, 0, word.length, (byte) 0);
 		int a = 0, ch;
 		try {
 			while ((ch = unraf.read()) != -1) {
@@ -125,35 +126,37 @@ public class Word2Vec {
 					continue;
 				if (ch == ' ' || ch == '\t' || ch == '\n') {
 					if (a > 0) {
-						if (ch == '\n') {
+						if (ch == ' ') {
 							unraf.unread();
 						}
 						break;
 					}
 					if (ch == '\n') {
-						word = "</s>".toCharArray();
-						return;
+						word = "</s>".getBytes();
+						unraf.unread();
+						return "</s>".getBytes().length;
 					} else
 						continue;
 				}
-				word[a] = (char) ch;
+				word[a] = (byte) ch;
 				a++;
-				if (a >= MAX_STRING - 1)
+				if (a >= 100 - 1)
 					a--;
 			}
-			word[a] = 0;
+			//System.out.println(new String(word));
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		return a;
 	}
 
 	// Returns hash value of a word
-	public static int getWordHash(char[] word) {
+	public static int getWordHash(byte[] word) {
 		int a;
 		BigInteger hash = BigInteger.ZERO;
 		for (a = 0; a < word.length; a++) {
 			if (word[a] != 0) {
-				hash = hash.multiply(new BigInteger(257 + "")).add(new BigInteger(Character.getNumericValue(word[a]) + ""));
+				hash = hash.multiply(new BigInteger(257 + "")).add(new BigInteger(word[a] + ""));
 			}
 		}
 		hash = hash.mod(new BigInteger(VOCAB_HASH_SIZE + ""));
@@ -163,7 +166,7 @@ public class Word2Vec {
 	public static String chword = "";
 
 	// Returns position of a word in the vocabulary; if the word is not found, returns -1
-	public static int searchVocab(char[] word) {
+	public static int searchVocab(byte[] word) {
 		chword = new String(word);
 		int hash = getWordHash(word);
 		while (true) {
@@ -186,7 +189,7 @@ public class Word2Vec {
 	}
 
 	public static int readWordIndex(UnReadRAF unraf) {
-		char[] word = new char[MAX_STRING];
+		byte[] word = new byte[MAX_STRING];
 		readWord(word, unraf);
 		try {
 			if (unraf.read() == -1)
@@ -198,13 +201,10 @@ public class Word2Vec {
 	}
 
 	// Adds a word to the vocabulary
-	public static int addWordToVocab(char[] word) {
+	public static int addWordToVocab(byte[] word) {
 		int hash, length = word.length + 1;
 		if (length > MAX_STRING)
 			length = MAX_STRING;
-		if (vocabSize == 1975) {
-			System.out.println(vocabSize);
-		}
 		vocabs[vocabSize].setWord(word);
 		vocabs[vocabSize].setCn(0);
 		vocabSize++;
@@ -250,7 +250,7 @@ public class Word2Vec {
 			// Words occuring less than min_count times will be discarded from the vocab
 			if (vocabs[a].getCn() < min_count) {
 				vocabSize--;
-				vocabs[vocabSize].setWord(new char[] {});
+				vocabs[vocabSize].setWord(new byte[] {});
 			} else {
 				// Hash will be re-computed, as after the sorting it is not actual
 				hash = getWordHash(vocabs[a].getWord());
@@ -264,7 +264,7 @@ public class Word2Vec {
 		// vocab = (struct vocab_word *)realloc(vocab, (vocab_size + 1) * sizeof(struct vocab_word));
 		// Allocate memory for the binary tree construction
 		for (a = 0; a < vocabSize; a++) {
-			vocabs[a].setCode(new char[MAX_CODE_LENGTH]);
+			vocabs[a].setCode(new byte[MAX_CODE_LENGTH]);
 			vocabs[a].setPoint(new int[MAX_CODE_LENGTH]);
 		}
 	}
@@ -279,7 +279,7 @@ public class Word2Vec {
 				vocabs[b].setWord(vocabs[a].getWord());
 				b++;
 			} else
-				vocabs[a].setWord(new char[] {});
+				vocabs[a].setWord(new byte[] {});
 		vocabSize = b;
 		for (a = 0; a < VOCAB_HASH_SIZE; a++)
 			vocabHash[a] = -1;
@@ -298,9 +298,9 @@ public class Word2Vec {
 	public static void createBinaryTree() {
 		int a, b, i, min1i, min2i, pos1, pos2;
 		int[] point = new int[MAX_CODE_LENGTH];
-		char[] code = new char[MAX_CODE_LENGTH];
+		byte[] code = new byte[MAX_CODE_LENGTH];
 		int[] count = new int[vocabSize * 2 + 1];
-		char[] binary = new char[vocabSize * 2 + 1];
+		byte[] binary = new byte[vocabSize * 2 + 1];
 		int[] parentNode = new int[vocabSize * 2 + 1];
 		for (a = 0; a < vocabSize; a++)
 			count[a] = vocabs[a].getCn();
@@ -367,26 +367,29 @@ public class Word2Vec {
 	public static void learnVocabFromTrainFile() {
 		UnReadRAF unraf = null;
 		try {
-			char[] word = new char[MAX_STRING];
+			byte[] word = new byte[MAX_STRING];
 			int a, i;
 			for (a = 0; a < VOCAB_HASH_SIZE; a++)
 				vocabHash[a] = -1;
 			unraf = new UnReadRAF(trainFile, "r");
 			vocabSize = 0;
-			addWordToVocab("</s>".toCharArray());
+			addWordToVocab("</s>".getBytes());
+			byte[] result;
 			while (true) {
-				readWord(word, unraf);
+				int len = readWord(word, unraf);
 				if (unraf.read() == -1) {
 					break;
 				}
+				result = Arrays.copyOfRange(word, 0, len);
 				trainWords++;
 				if ((debug_mode > 1) && (trainWords % 100000 == 0)) {
-					System.out.printf("%dK%c", trainWords / 1000, 13);
+					//System.out.println(trainWords / 1000 + "K," + vocabSize);
+					System.out.printf("%dK %d%c", trainWords / 1000, vocabSize, 13);
 				}
-				i = searchVocab(word);
+				i = searchVocab(result);
 				if (i == -1) {
 					try {
-						a = addWordToVocab(word);
+						a = addWordToVocab(result);
 						vocabs[a].setCn(1);
 					} catch (Exception e) {
 						e.printStackTrace();
@@ -444,7 +447,7 @@ public class Word2Vec {
 		try {
 			int a, i = 0;
 			//char c;
-			char[] word = new char[MAX_STRING];
+			byte[] word = new byte[MAX_STRING];
 			unraf = new UnReadRAF(readVocabFile, "r");
 			for (a = 0; a < VOCAB_HASH_SIZE; a++)
 				vocabHash[a] = -1;
@@ -484,28 +487,33 @@ public class Word2Vec {
 	}
 
 	public static void initNet() {
-		int a, b;
-		syn0 = new double[vocabSize][layer1Size];
-		if (hs != 0) {
-			syn1 = new double[vocabSize][layer1Size];
+		try {
+			int a, b;
+			syn0 = new double[vocabSize][layer1Size];
+			if (hs != 0) {
+				syn1 = new double[vocabSize][layer1Size];
+				for (b = 0; b < layer1Size; b++)
+					for (a = 0; a < vocabSize; a++)
+						syn1[a][b] = 0;
+				//syn1[a * layer1Size + b] = 0;
+			}
+			if (negative > 0) {
+				syn1neg = new double[vocabSize][layer1Size];
+				for (b = 0; b < layer1Size; b++)
+					for (a = 0; a < vocabSize; a++)
+						syn1neg[a][b] = 0;
+				//syn1neg[a * layer1Size + b] = 0;
+			}
+			Random random = new Random();
 			for (b = 0; b < layer1Size; b++)
 				for (a = 0; a < vocabSize; a++)
-					syn1[a][b] = 0;
-			//syn1[a * layer1Size + b] = 0;
+					syn0[a][b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
+			//syn0[a * layer1Size + b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
+			createBinaryTree();
+		} catch (Exception e) {
+			System.out.println(new Date() + "-" + vocabSize);
+			e.printStackTrace();
 		}
-		if (negative > 0) {
-			syn1neg = new double[vocabSize][layer1Size];
-			for (b = 0; b < layer1Size; b++)
-				for (a = 0; a < vocabSize; a++)
-					syn1neg[a][b] = 0;
-			//syn1neg[a * layer1Size + b] = 0;
-		}
-		Random random = new Random();
-		for (b = 0; b < layer1Size; b++)
-			for (a = 0; a < vocabSize; a++)
-				syn0[a][b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
-		//syn0[a * layer1Size + b] = (float) ((random.nextFloat() - 0.5) / layer1Size);
-		createBinaryTree();
 	}
 
 	public static class TrainModelThread extends Thread {
