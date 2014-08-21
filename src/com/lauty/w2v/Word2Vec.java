@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.RandomAccessFile;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
@@ -27,8 +28,8 @@ public class Word2Vec {
 
 	public static class VocabWord {
 		Integer cn = 0;
-		int[] point = new int[MAX_CODE_LENGTH];
-		byte[] code = new byte[MAX_CODE_LENGTH];
+		Integer[] point = new Integer[MAX_CODE_LENGTH];
+		Byte[] code = new Byte[MAX_CODE_LENGTH];
 		String word = "";
 		Integer codeLen = 0;
 
@@ -40,11 +41,11 @@ public class Word2Vec {
 			this.cn = cn;
 		}
 
-		public int[] getPoint() {
+		public Integer[] getPoint() {
 			return point;
 		}
 
-		public void setPoint(int[] point) {
+		public void setPoint(Integer[] point) {
 			this.point = point;
 		}
 
@@ -56,11 +57,11 @@ public class Word2Vec {
 			this.word = word;
 		}
 
-		public byte[] getCode() {
+		public Byte[] getCode() {
 			return code;
 		}
 
-		public void setCode(byte[] code) {
+		public void setCode(Byte[] code) {
 			this.code = code;
 		}
 
@@ -70,6 +71,11 @@ public class Word2Vec {
 
 		public void setCodeLen(Integer codeLen) {
 			this.codeLen = codeLen;
+		}
+
+		@Override
+		public String toString() {
+			return getWord() + "," + getCn() + "," + getCodeLen() + "," + Arrays.deepToString(getPoint()) + "," + Arrays.deepToString(getCode());
 		}
 
 	}
@@ -199,7 +205,7 @@ public class Word2Vec {
 				return o2.getCn() - o1.getCn();
 			}
 		};
-		Arrays.sort(vocabs, comparator);
+		Arrays.sort(vocabs, 1, vocabs.length, comparator);
 		for (a = 0; a < VOCAB_HASH_SIZE; a++)
 			vocabHash[a] = -1;
 		size = vocabSize;
@@ -316,6 +322,7 @@ public class Word2Vec {
 				vocabs[a].code[i - b - 1] = code[b];
 				vocabs[a].point[i - b] = point[b] - vocabSize;
 			}
+			//System.out.println(vocabs[a]);
 		}
 		count = null;
 		binary = null;
@@ -352,7 +359,11 @@ public class Word2Vec {
 					if (vocabSize > VOCAB_HASH_SIZE * 0.7)
 						reduceVocab();
 				}
+				i = searchVocab("</s>");
+				vocabs[i].setCn(vocabs[i].getCn() + 1);
 			}
+			i = searchVocab("</s>");
+			vocabs[i].setCn(vocabs[i].getCn() - 1);
 			System.out.println(new Date() + ",开始sort,vocab_size=" + vocabSize);
 			sortVocab();
 			System.out.println(new Date() + ",结束sort,vocab_size=" + vocabSize);
