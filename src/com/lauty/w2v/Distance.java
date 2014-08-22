@@ -3,9 +3,12 @@ package com.lauty.w2v;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.FileInputStream;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -232,6 +235,54 @@ public class Distance {
 		}
 		result.pollFirst();
 		return result;
+	}
+
+	public Set<WordEntry> analogy(List<String> threeWords) throws Exception {
+		if (threeWords == null || threeWords.size() < 3) {
+			throw new Exception("Only " + threeWords.size() + " words were entered.. three words are needed at the input to perform the calculation");
+		}
+		double[] center1 = wordScores.get(threeWords.get(0));
+		double[] center2 = wordScores.get(threeWords.get(1));
+		double[] center3 = wordScores.get(threeWords.get(2));
+		double[] wordVector = new double[size];
+		for (int i = 0; i < size; i++) {
+			wordVector[i] = center2[i] - center1[i] + center3[i];
+		}
+		double[] tempVector;
+		String name;
+		List<WordEntry> wordEntrys = new ArrayList<WordEntry>(N);
+		for (Entry<String, double[]> entry : wordScores.entrySet()) {
+			name = entry.getKey();
+			if (name.equals(threeWords.get(0)) || name.equals(threeWords.get(1)) || name.equals(threeWords.get(2))) {
+				continue;
+			}
+			float dist = 0;
+			tempVector = entry.getValue();
+			for (int i = 0; i < wordVector.length; i++) {
+				dist += wordVector[i] * tempVector[i];
+			}
+			insertTopN(name, dist, wordEntrys);
+		}
+		return null;
+	}
+
+	private void insertTopN(String name, float score, List<WordEntry> wordsEntrys) {
+		if (wordsEntrys.size() < N) {
+			wordsEntrys.add(new WordEntry(name, score));
+			return;
+		}
+		double min = Float.MAX_VALUE;
+		int minOffe = 0;
+		for (int i = 0; i < N; i++) {
+			WordEntry wordEntry = wordsEntrys.get(i);
+			if (min > wordEntry.score) {
+				min = wordEntry.score;
+				minOffe = i;
+			}
+		}
+		if (score > min) {
+			wordsEntrys.set(minOffe, new WordEntry(name, score));
+		}
 	}
 
 	public static void main(String[] args) throws Exception {
