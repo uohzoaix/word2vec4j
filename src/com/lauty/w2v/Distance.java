@@ -237,6 +237,6 @@ public class Distance {
 	public static void main(String[] args) throws Exception {
 		Distance distance = new Distance("vectors.bin");
 		//distance.distance("过年");
-		System.out.println(distance.distance("中"));
+		System.out.println(distance.distance("过年"));
 	}
 }
