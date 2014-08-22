@@ -72,7 +72,7 @@ public class Word2Phrases {
 		return -1;
 	}
 
-	public static void beginTrain(String[] args) {
+	public static void beginTrain(String[] args) throws FileNotFoundException {
 		int i;
 		if (args.length == 0) {
 			System.out.println("WORD2PHRASE tool v0.1a\n");
@@ -106,18 +106,18 @@ public class Word2Phrases {
 		trainModel();
 	}
 
-	public static void trainModel() {
+	public static void trainModel() throws FileNotFoundException {
 		long pa = 0, pb = 0, pab = 0, oov, i, li = -1, cn = 0;
-		
-		  char word[MAX_STRING], last_word[MAX_STRING], bigram_word[MAX_STRING * 2];
-		  float score;
-		  System.out.println(String.format("Starting training using file %s", trainFile));
-		  learnVocabFromTrainFile();
-		  DataOutputStream dos = null;
-		  BufferedReader br=null;
-		  try {
-			  br = new BufferedReader(new InputStreamReader(new FileInputStream(trainFile)));
-			  dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile)));
+
+		//char word[MAX_STRING], last_word[MAX_STRING], bigram_word[MAX_STRING * 2];
+		float score;
+		System.out.println(String.format("Starting training using file %s", trainFile));
+		learnVocabFromTrainFile();
+		DataOutputStream dos = null;
+		BufferedReader br = null;
+		try {
+			br = new BufferedReader(new InputStreamReader(new FileInputStream(trainFile)));
+			dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(outputFile)));
 		} catch (Exception e) {
 		}
 	}
