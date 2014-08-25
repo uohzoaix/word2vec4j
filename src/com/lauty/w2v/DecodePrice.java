@@ -2,12 +2,12 @@ package com.lauty.w2v;
 
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Calendar;
+
+import com.lauty.w2v.util.TanxUtil;
 
 public class DecodePrice {
 
@@ -30,25 +30,6 @@ public class DecodePrice {
 
 	private static final byte[] G_KEY = { (byte) 0xf7, (byte) 0xdb, (byte) 0xeb, 0x73, 0x5b, 0x7a, 0x07, (byte) 0xf1, (byte) 0xcf, (byte) 0xca, 0x79, (byte) 0xcc, 0x1d, (byte) 0xfe, 0x4f, (byte) 0xa4 };
 
-	public static int swab32(int x) {
-		return (x & 0x000000ff << 24) | (x & 0x000000ff << 8) | (x & 0x000000ff << 8) | (x & 0x000000ff >> 24);
-	}
-
-	public static byte[] MD5(byte[] bytes) {
-		MessageDigest md = null;
-		try {
-			md = MessageDigest.getInstance("MD5");
-		} catch (NoSuchAlgorithmException e) {
-			e.printStackTrace();
-		}
-		md.update(bytes);
-		byte[] bs = md.digest();
-		//		for (byte b : bs) {
-		//			System.out.print(b + "|");
-		//		}
-		return bs;
-	}
-
 	// Step list for decoding original price
 	// If this function returns true, real price will return to realPrice 
 	// variable and bidding time will return to time variable
@@ -69,7 +50,7 @@ public class DecodePrice {
 
 		// ctxBuf=MD5(bidid+key)
 		byte[] ctxBuf = new byte[16];
-		ctxBuf = MD5(Arrays.copyOfRange(buf, 0, 32));
+		ctxBuf = TanxUtil.MD5(Arrays.copyOfRange(buf, 0, 32));
 		// MD5(buf, 32, ctxBuf);
 
 		// Get settle price
@@ -79,17 +60,25 @@ public class DecodePrice {
 		for (int i = 0; i < 4; ++i) {
 			p1[i] = (byte) (p2[i] ^ p3[i]);
 		}
-		int price = fromByteArray(p1);
+		int price = TanxUtil.fromByteArray(p1);
 		// Big endian needs reverse price by byte
 		if (IS_BIG_ENDIAN) {
-			pt.setPrice(swab32(price));
+			pt.setPrice(TanxUtil.swab32(price));
 		} else {
 			pt.setPrice(price);
 		}
 
 		// Calc crc and compare with src
 		// If not match, it is illegal
+		checkSum(buf, src, p1);
+		long mills = ByteBuffer.wrap(Arrays.copyOfRange(src, MAGICTIME_OFFSET, src.length)).getInt();
+		mills = mills * 1000;
+		calendar.setTimeInMillis(mills);
+		pt.setTime(formatter.format(calendar.getTime()));
+		return pt;
+	}
 
+	public static void checkSum(byte[] buf, byte[] src, byte[] p1) throws Exception {
 		// copy(version+bidid+settlePrice+key)
 		int vb = VERSION_LENGTH + BIDID_LENGTH;
 		byte[] pbuf = buf;
@@ -103,7 +92,7 @@ public class DecodePrice {
 		System.arraycopy(G_KEY, 0, pbuf, vb + 4, KEY_LENGTH);// copy key
 
 		// MD5(version+bidid+settlePrice+key)
-		ctxBuf = MD5(Arrays.copyOfRange(pbuf, 0, VERSION_LENGTH + BIDID_LENGTH + 4 + KEY_LENGTH));
+		byte[] ctxBuf = TanxUtil.MD5(Arrays.copyOfRange(pbuf, 0, VERSION_LENGTH + BIDID_LENGTH + 4 + KEY_LENGTH));
 		int i, j = 0;
 		for (i = CRC_OFFSITE; i < CRC_OFFSITE + CRC_LENGTH;) {
 			for (; j < CRC_LENGTH;) {
@@ -115,47 +104,6 @@ public class DecodePrice {
 				break;
 			}
 		}
-		long mills = ByteBuffer.wrap(Arrays.copyOfRange(src, MAGICTIME_OFFSET, src.length)).getInt();
-		mills = mills * 1000;
-		calendar.setTimeInMillis(mills);
-		pt.setTime(formatter.format(calendar.getTime()));
-		return pt;
-	}
-
-	public static int fromByteArray(byte[] bytes) {
-		return bytes[3] << 24 | (bytes[2] & 0xFF) << 16 | (bytes[1] & 0xFF) << 8 | (bytes[0] & 0xFF);
-	}
-
-	private final static char[] ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toCharArray();
-	private static int[] toInt = new int[128];
-
-	static {
-		for (int i = 0; i < ALPHABET.length; i++) {
-			toInt[ALPHABET[i]] = i;
-		}
-	}
-
-	public static byte[] base64Decode(String s) {
-		int delta = s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0;
-		byte[] buffer = new byte[s.length() * 3 / 4 - delta];
-		int mask = 0xFF;
-		int index = 0;
-		for (int i = 0; i < s.length(); i += 4) {
-			int c0 = toInt[s.charAt(i)];
-			int c1 = toInt[s.charAt(i + 1)];
-			buffer[index++] = (byte) (((c0 << 2) | (c1 >> 4)) & mask);
-			if (index >= buffer.length) {
-				return buffer;
-			}
-			int c2 = toInt[s.charAt(i + 2)];
-			buffer[index++] = (byte) (((c1 << 4) | (c2 >> 2)) & mask);
-			if (index >= buffer.length) {
-				return buffer;
-			}
-			int c3 = toInt[s.charAt(i + 3)];
-			buffer[index++] = (byte) (((c2 << 6) | c3) & mask);
-		}
-		return buffer;
 	}
 
 	static class PriceTime {
@@ -194,7 +142,7 @@ public class DecodePrice {
 	public static void main(String[] args) throws Exception {
 		byte src[] = "AQtlz3ImkFBRQ5MAAADFkK5AX2YJU4kNig%3D%3D".getBytes();
 		String origstr = URLDecoder.decode(new String(src), "UTF-8");
-		byte[] orig = base64Decode(origstr);
+		byte[] orig = TanxUtil.base64Decode(origstr);
 		int origLen = orig.length;
 		// 25 bytes fixed length
 		if (origLen != VERSION_LENGTH + BIDID_LENGTH + ENCODEPRICE_LENGTH + CRC_LENGTH) {
@@ -203,11 +151,5 @@ public class DecodePrice {
 		Integer price = null;
 		String time = null;
 		System.out.println(decodePrice(orig, new PriceTime(price, time)));
-		//if (decodePrice(orig, price, time)) {
-		//struct tm tm;
-		//localtime_r(&time, &tm);
-
-		//	System.out.println("Decode price ok, price = " + price + ",Bid time is " + time);
-		//}
 	}
 }
