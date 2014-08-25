@@ -70,7 +70,7 @@ public class DecodePrice {
 
 		// Calc crc and compare with src
 		// If not match, it is illegal
-		checkSum(buf, src, p1);
+		checkSum(src, p1);
 		long mills = ByteBuffer.wrap(Arrays.copyOfRange(src, MAGICTIME_OFFSET, src.length)).getInt();
 		mills = mills * 1000;
 		calendar.setTimeInMillis(mills);
@@ -78,21 +78,17 @@ public class DecodePrice {
 		return pt;
 	}
 
-	public static void checkSum(byte[] buf, byte[] src, byte[] p1) throws Exception {
+	public static void checkSum(byte[] src, byte[] p1) throws Exception {
 		// copy(version+bidid+settlePrice+key)
 		int vb = VERSION_LENGTH + BIDID_LENGTH;
-		byte[] pbuf = buf;
-		//System.arraycopy(buf, 0, pbuf, 0, buf.length);
+		byte[] pbuf = new byte[VERSION_LENGTH + BIDID_LENGTH + 4 + KEY_LENGTH];
 		System.arraycopy(src, 0, pbuf, 0, vb);//copy version+bidid
-
 		// Notice: here is price not realPrice
 		// More important for big endian !
-
 		System.arraycopy(p1, 0, pbuf, vb, 4);// copy settlePrice
 		System.arraycopy(G_KEY, 0, pbuf, vb + 4, KEY_LENGTH);// copy key
-
 		// MD5(version+bidid+settlePrice+key)
-		byte[] ctxBuf = TanxUtil.MD5(Arrays.copyOfRange(pbuf, 0, VERSION_LENGTH + BIDID_LENGTH + 4 + KEY_LENGTH));
+		byte[] ctxBuf = TanxUtil.MD5(pbuf);
 		int i, j = 0;
 		for (i = CRC_OFFSITE; i < CRC_OFFSITE + CRC_LENGTH;) {
 			for (; j < CRC_LENGTH;) {

@@ -64,23 +64,21 @@ public class DecodeDeviceId {
 
 		// Calc crc and compare with src
 		// If not match, it is illegal
-		checkSum(buf, deviceId, src, len);
+		checkSum(deviceId, src, len);
 		return realDeviceId;
 	}
 
-	public static void checkSum(byte[] buf, byte[] deviceId, byte[] src, int len) throws Exception {
+	public static void checkSum(byte[] deviceId, byte[] src, int len) throws Exception {
 		// copy(version+length+deviceId+key)
 		int vd = VERSION_LENGTH + DEVICEID_LENGTH;
-		byte[] pbuf = buf;
+		byte[] pbuf = new byte[VERSION_LENGTH + DEVICEID_LENGTH + len + KEY_LENGTH];
 		System.arraycopy(src, 0, pbuf, 0, vd);//copy version+bidid
-
 		// Notice: here is deviceId not realDeviceId
 		// More important for big endian !
 		System.arraycopy(deviceId, 0, pbuf, vd, len);// copy deviceId
 		System.arraycopy(G_KEY, 0, pbuf, vd + len, KEY_LENGTH);// copy key
-
 		// MD5(version+length+deviceId+key)
-		byte[] ctxBuf = TanxUtil.MD5(Arrays.copyOfRange(pbuf, 0, VERSION_LENGTH + DEVICEID_LENGTH + len + KEY_LENGTH));
+		byte[] ctxBuf = TanxUtil.MD5(pbuf);
 		int i, j = 0;
 		for (i = ENCODEDEVICEID_OFFSITE + len; i < ENCODEDEVICEID_OFFSITE + len + CRC_LENGTH;) {
 			for (; j < CRC_LENGTH;) {
