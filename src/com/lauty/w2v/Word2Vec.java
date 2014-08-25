@@ -659,13 +659,14 @@ public class Word2Vec {
 		int l1, l2, target;
 		double f, g;
 		long label;
-		double[] neu1e = new double[layer1Size];
 		int sentence_length = sen.length;
+		double[] neu1e = new double[layer1Size];
 		for (int a = b; a < window * 2 + 1 - b; a++) {
 			if (a != window) {
 				int c = sentence_position - window + a;
 				if (c < 0 || c >= sentence_length)
 					continue;
+				Arrays.fill(neu1e, 0);
 				int last_word = sen[c];
 				if (last_word == -1)
 					continue;
