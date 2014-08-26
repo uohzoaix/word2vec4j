@@ -3,6 +3,7 @@ package com.lauty.w2v;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 
 import com.lauty.w2v.util.UnReadRAF;
 
@@ -29,7 +30,7 @@ public class test {
 		}
 	}
 
-	public static void main(String[] args) throws IOException {
+	public static void main2(String[] args) throws IOException {
 		UnReadRAF unraf = new UnReadRAF("test.txt", "r");
 		byte[] word = new byte[100];
 		while (true) {
@@ -73,4 +74,5 @@ public class test {
 		}
 		return a;
 	}
+
 }

@@ -162,11 +162,11 @@ public class Word2Vec {
 	// Adds a word to the vocabulary
 	public static int addWordToVocab(String word) {
 		int hash = 0, length = word.length();
-		if (length > MAX_STRING)
-			length = MAX_STRING;
-		word = word.substring(0, length);
+		if (length > MAX_STRING) {
+			word = word.substring(0, MAX_STRING);
+		}
 		vocabs[vocabSize].setWord(word);
-		vocabs[vocabSize].setCn(0);
+		vocabs[vocabSize].setCn(1);
 		vocabSize++;
 		// Reallocate memory if needed
 		if (vocabSize + 2 >= vocabMaxSize) {
@@ -337,19 +337,20 @@ public class Word2Vec {
 			vocabSize = 0;
 			addWordToVocab("</s>");
 			String temp = null;
+			int num = 0;
 			while ((temp = br.readLine()) != null) {
 				String[] strs = temp.split(" ");
+				trainWords += strs.length;
+				if ((debug_mode > 1) && (trainWords % 100000 == 0)) {
+					//System.out.println(trainWords / 1000 + "K," + vocabSize);
+					System.out.printf("%dK %d%c", trainWords / 1000, vocabSize, 13);
+				}
 				for (String str : strs) {
-					trainWords++;
-					if ((debug_mode > 1) && (trainWords % 100000 == 0)) {
-						//System.out.println(trainWords / 1000 + "K," + vocabSize);
-						System.out.printf("%dK %d%c", trainWords / 1000, vocabSize, 13);
-					}
 					i = searchVocab(str);
 					if (i == -1) {
 						try {
-							a = addWordToVocab(str);
-							vocabs[a].setCn(1);
+							addWordToVocab(str);
+							//vocabs[a].setCn(1);
 						} catch (Exception e) {
 							e.printStackTrace();
 						}
@@ -358,11 +359,12 @@ public class Word2Vec {
 					if (vocabSize > VOCAB_HASH_SIZE * 0.7)
 						reduceVocab();
 				}
-				i = searchVocab("</s>");
-				vocabs[i].setCn(vocabs[i].getCn() + 1);
+				num++;
+				//i = searchVocab("</s>");
+				//vocabs[i].setCn(vocabs[i].getCn() + 1);
 			}
 			i = searchVocab("</s>");
-			vocabs[i].setCn(vocabs[i].getCn() - 1);
+			vocabs[i].setCn(num - 2);
 			System.out.println(new Date() + ",开始sort,vocab_size=" + vocabSize);
 			sortVocab();
 			System.out.println(new Date() + ",结束sort,vocab_size=" + vocabSize);
